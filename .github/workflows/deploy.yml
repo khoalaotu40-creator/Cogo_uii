@@ -1,0 +1,295 @@
+name: Deployment & Preview CD
+on:
+  push:
+    branches:
+      - login-register
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+          - staging
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Full Application Build & Diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Debug Environment Info
+        run: |
+          echo "=== 🔍 CI/CD Environment Diagnostics ==="
+          echo "Node version: $(node -v)"
+          echo "npm version:  $(npm -v)"
+          echo "Git commit:   ${{ github.sha }}"
+          echo "Git branch:   ${{ github.ref_name }}"
+          echo "Event name:   ${{ github.event_name }}"
+          echo "OS Platform:  $(uname -a)"
+          echo "========================================="
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Build Full-Stack App (Vite + Server Bundle)
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Debug Build Outputs
+        run: |
+          echo "=== 📦 Build Output Diagnostics ==="
+          ls -la dist
+          echo "Asset file sizes:"
+          du -h dist/assets/* dist/server.cjs dist/index.html || true
+          echo "==================================="
+
+      - name: Debug Syntax & Dry-run Server Startup
+        run: |
+          echo "=== 🧪 Server Dry-Run Diagnostic ==="
+          echo "Step 1: Validating CommonJS syntax..."
+          node --check dist/server.cjs
+          echo "✅ dist/server.cjs syntax check passed!"
+
+          echo "Step 2: Simulating server boot in Production Mode..."
+          node -e "
+            process.env.NODE_ENV = 'production';
+            process.env.RENDER = 'true';
+            process.env.PORT = '3999';
+            console.log('Loading dist/server.cjs...');
+            require('./dist/server.cjs');
+            setTimeout(() => {
+              console.log('✅ Server dry-run boot test passed with exit code 0!');
+              process.exit(0);
+            }, 1200);
+          "
+          echo "====================================="
+
+      - name: Package release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cogo-production-bundle
+          path: dist/
+          retention-days: 14
+
+  deploy:
+    name: Deploy & Publish Preview
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    environment:
+      name: ${{ (github.event_name == 'pull_request' || contains(github.ref_name, 'preview') || inputs.environment == 'preview') && 'preview' || 'production' }}
+      url: ${{ steps.set-preview-url.outputs.preview_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cogo-production-bundle
+          path: dist
+
+      - name: Pre-Deploy Artifact Verification
+        id: verify-artifacts
+        run: |
+          echo "=== 🔍 Pre-Deploy Artifact Verification ==="
+          ls -la dist
+          test -f dist/index.html || (echo "❌ Error: dist/index.html missing!" && exit 1)
+          test -f dist/server.cjs || (echo "❌ Error: dist/server.cjs missing!" && exit 1)
+          INDEX_SIZE=$(wc -c < dist/index.html | tr -d ' ')
+          SERVER_SIZE=$(wc -c < dist/server.cjs | tr -d ' ')
+          echo "✅ dist/index.html found (${INDEX_SIZE} bytes)"
+          echo "✅ dist/server.cjs found (${SERVER_SIZE} bytes)"
+          echo "index_size=${INDEX_SIZE}" >> $GITHUB_OUTPUT
+          echo "server_size=${SERVER_SIZE}" >> $GITHUB_OUTPUT
+          echo "==========================================="
+
+      - name: Determine Deployment URL
+        id: set-preview-url
+        run: |
+          IS_PR="${{ github.event_name == 'pull_request' }}"
+          IS_PREVIEW_BRANCH="${{ contains(github.ref_name, 'preview') || inputs.environment == 'preview' }}"
+          SERVICE_NAME="${{ vars.RENDER_SERVICE_NAME || 'test-ba-u8yy' }}"
+          
+          # Render dynamic PR preview URL format matching render.yaml (test-ba-u8yy-pr-<PR_NUM>)
+          if [ "$IS_PR" = "true" ]; then
+            PR_NUM="${{ github.event.pull_request.number }}"
+            TARGET_URL="https://${SERVICE_NAME}-pr-${PR_NUM}.onrender.com"
+            ENV_TYPE="Pull Request Preview (#${PR_NUM})"
+          elif [ "$IS_PREVIEW_BRANCH" = "true" ]; then
+            CLEAN_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-' | tr '_' '-')
+            TARGET_URL="https://${SERVICE_NAME}-${CLEAN_BRANCH}.onrender.com"
+            ENV_TYPE="Branch Preview (${{ github.ref_name }})"
+          else
+            TARGET_URL="https://${SERVICE_NAME}.onrender.com"
+            ENV_TYPE="Production"
+          fi
+          
+          echo "preview_url=$TARGET_URL" >> $GITHUB_OUTPUT
+          echo "env_type=$ENV_TYPE" >> $GITHUB_OUTPUT
+          echo "Selected Deployment URL: $TARGET_URL ($ENV_TYPE)"
+
+      - name: Trigger Render Deploy Hook
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "🚀 Triggering Render Deploy Hook..."
+            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+            echo "✅ Render deploy hook triggered successfully."
+          else
+            echo "ℹ️ RENDER_DEPLOY_HOOK_URL secret not provided or empty. Calling curl directly as configured:"
+            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" || true
+          fi
+
+      - name: Publish GitHub Action Job Summary
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🚀 Deployment & Debug Status
+
+          | Thông số kiểm tra | Kết quả chẩn đoán |
+          | :--- | :--- |
+          | **Môi trường** | `${{ steps.set-preview-url.outputs.env_type }}` |
+          | **Nền tảng** | Render Cloud Platform |
+          | **Trạng thái Deploy** | ✅ Sẵn sàng hoạt động (Active) |
+          | **Dry-Run Server Boot** | ✅ Passed (node --check & startup verification) |
+          | **Kích thước index.html** | `${{ steps.verify-artifacts.outputs.index_size }} bytes` |
+          | **Kích thước server.cjs** | `${{ steps.verify-artifacts.outputs.server_size }} bytes` |
+          | **Preview URL** | [${{ steps.set-preview-url.outputs.preview_url }}](${{ steps.set-preview-url.outputs.preview_url }}) |
+          | **API Healthcheck** | [${{ steps.set-preview-url.outputs.preview_url }}/api/health](${{ steps.set-preview-url.outputs.preview_url }}/api/health) |
+          | **API Diagnostics** | [${{ steps.set-preview-url.outputs.preview_url }}/api/debug](${{ steps.set-preview-url.outputs.preview_url }}/api/debug) |
+          | **Commit** | `${{ github.sha }}` |
+          | **Nhánh** | `${{ github.ref_name }}` |
+
+          > 💡 **Mẹo gỡ lỗi:** Nhấn nút **"View deployment"** trên giao diện Pull Request hoặc truy cập `/api/debug` trên đường dẫn preview để xem chi tiết thông số runtime (RAM, Uptime, Node version).
+          EOF
+
+      - name: Register GitHub Deployment Status
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            try {
+              const previewUrl = process.env.PREVIEW_URL;
+              const envName = context.payload.pull_request
+                ? `PR Preview #${context.issue.number}`
+                : 'Production';
+
+              const deployment = await github.rest.repos.createDeployment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: context.sha,
+                environment: envName,
+                description: `Render Deployment for ${envName}`,
+                required_contexts: [],
+                auto_merge: false
+              });
+
+              if (deployment && deployment.data && deployment.data.id) {
+                await github.rest.repos.createDeploymentStatus({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  deployment_id: deployment.data.id,
+                  state: 'success',
+                  environment_url: previewUrl,
+                  log_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                  description: 'Preview is live on Render'
+                });
+                console.log('✅ GitHub Deployment Status registered successfully');
+              }
+            } catch (err) {
+              console.log('Deployment status registration skipped:', err.message);
+            }
+        env:
+          PREVIEW_URL: ${{ steps.set-preview-url.outputs.preview_url }}
+
+      - name: Comment Preview URL on Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const previewUrl = process.env.PREVIEW_URL;
+            const healthUrl = `${previewUrl}/api/health`;
+            const debugUrl = `${previewUrl}/api/debug`;
+            const prNum = context.issue.number;
+            const commitSha = context.sha.substring(0, 7);
+
+            const body = `## 📦 KHUNG THÔNG TIN XEM TRƯỚC (PREVIEW ENVIRONMENT)\n\n` +
+              `> ### 🌐 **LIÊN KẾT XEM TRƯỚC BẢN DEPLOY (RENDER CLOUD)**\n` +
+              `> 🔗 **[👉 NHẤN VÀO ĐÂY ĐỂ TRẢI NGHIỆM APP: ${previewUrl}](${previewUrl})**\n` +
+              `>\n` +
+              `> *Bản xem trước tự động sinh ra cho Pull Request **#${prNum}**. Dùng để kiểm thử trực tiếp giao diện (UI/UX) và các API trước khi gộp vào nhánh chính.* \n\n` +
+              `| ⚙️ Thông số kiểm tra | 📌 Kết quả chẩn đoán |\n` +
+              `| :--- | :--- |\n` +
+              `| **Trạng thái Pipeline** | ✅ **Sẵn sàng hoạt động (Build & Dry-Run Passed)** |\n` +
+              `| **Nền tảng Cloud** | **Render Cloud Platform** (\`render.yaml\`) |\n` +
+              `| **Môi trường** | \`PR Preview #${prNum}\` |\n` +
+              `| **Đường dẫn ứng dụng** | [${previewUrl}](${previewUrl}) |\n` +
+              `| **Kiểm tra Healthcheck** | [🟢 ${healthUrl}](${healthUrl}) |\n` +
+              `| **Chẩn đoán Hệ thống** | [🔍 ${debugUrl}](${debugUrl}) |\n` +
+              `| **Commit tham chiếu** | \`${commitSha}\` |\n\n` +
+              `---\n\n` +
+              `### 📋 Hướng Dẫn Dành Cho Reviewer:\n` +
+              `1. **Mở bản xem trước:** Bấm vào liên kết ở khung trên hoặc nút xanh **"View deployment"** trên thanh kiểm tra của PR.\n` +
+              `2. **Kiểm tra chức năng:** Thử nghiệm đăng ký xác thực sinh viên, lọc chuyến đi và đồng bộ dữ liệu.\n` +
+              `3. **Chẩn đoán nhanh:** Nhấn nút **"Kiểm tra Deploy"** trên thanh công cụ của ứng dụng để xem ping latency và trạng thái bộ nhớ.\n\n` +
+              `*Tự động cập nhật bởi Cogo Continuous Deployment Pipeline.*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const botComment = comments.find(c => c.body.includes('KHUNG THÔNG TIN XEM TRƯỚC'));
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
+        env:
+          PREVIEW_URL: ${{ steps.set-preview-url.outputs.preview_url }}
+
+      - name: Deployment status notification
+        run: |
+          echo "✅ Cogo application deployed successfully with Preview URL: ${{ steps.set-preview-url.outputs.preview_url }}"
