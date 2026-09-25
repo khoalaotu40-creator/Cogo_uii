@@ -8,7 +8,7 @@ PASS
 
 ## Git
 Branch: login-register
-Commit: 8e27cf5
+Commit: ef54814
 
 ## GitHub Actions
 PASS
@@ -29,4 +29,4 @@ Student Verification: NOT VERIFIED
 NO
 
 ## Blockers
-E2E testing is blocked due to the lack of an SMS/OTP provider for receiving actual OTP codes and unverified Supabase credentials/database provisioning for a true end-to-end test on the preview environment.
+Thiếu SMS/OTP provider thật và test credentials (Supabase/Render environment variables) để thực hiện E2E testing hoàn chỉnh trên môi trường Preview.
