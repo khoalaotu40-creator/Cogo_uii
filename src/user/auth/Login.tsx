@@ -22,6 +22,8 @@ export function Login() {
       }
 
       await api.post('/auth/otp/request', { phone, type: 'login' });
+      sessionStorage.setItem('otpPhone', phone);
+      sessionStorage.setItem('otpType', 'login');
       navigate('/register/verify-phone', { state: { phone, type: 'login' } });
     } catch (err: unknown) {
       if (err instanceof Error) {

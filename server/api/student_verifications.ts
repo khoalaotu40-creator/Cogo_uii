@@ -1,6 +1,5 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { supabaseAdmin } from '../db';
-import { Request, Response } from 'express';
 import multer from 'multer';
 
 const router = Router();
@@ -8,22 +7,41 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 }); 
 
-router.post('/', upload.single('cardImage'), async (req: Request, res: Response): Promise<any> => {
+router.post('/', upload.single('cardImage'), async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+  if (!authHeader) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
   const token = authHeader.split(' ')[1];
 
-  const { studentId, universityId = '1' } = req.body;
+  const { studentId, universityId } = req.body;
   const file = req.file;
-  if (!file) return res.status(400).json({ error: 'Card image is required' });
+
+  if (!studentId || !universityId) {
+    res.status(400).json({ error: 'Missing studentId or universityId' });
+    return;
+  }
+  if (!file) {
+    res.status(400).json({ error: 'Card image is required' });
+    return;
+  }
 
   try {
-    // 1. Authenticate user
     const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+    if (authErr || !user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
 
-    // 2. Upload to private bucket
-    const filePath = `${user.id}/${Date.now()}_${file.originalname}`;
+    // Verify university exists
+    const { data: uni } = await supabaseAdmin.from('universities').select('id').eq('id', universityId).single();
+    if (!uni) {
+      res.status(400).json({ error: 'University not found' });
+      return;
+    }
+
+    const filePath = `${user.id}/${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
     const { error: uploadError } = await supabaseAdmin.storage
       .from('student_cards')
       .upload(filePath, file.buffer, {
@@ -32,37 +50,48 @@ router.post('/', upload.single('cardImage'), async (req: Request, res: Response)
 
     if (uploadError) throw uploadError;
 
-    // 3. Create student verification record
+    // Update or insert profile
+    const { error: profileErr } = await supabaseAdmin.from('student_profiles').upsert({
+      user_id: user.id,
+      university_id: universityId,
+      student_id: studentId,
+      verification_status: 'PENDING'
+    }, { onConflict: 'user_id' });
+
+    if (profileErr) throw profileErr;
+
     const { error: insertErr } = await supabaseAdmin.from('student_verifications').insert({
       user_id: user.id,
       university_id: universityId,
       student_id: studentId,
       card_front_path: filePath,
       status: 'PENDING',
-      submitted_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     });
 
     if (insertErr) throw insertErr;
 
-    // Update user profile status
     await supabaseAdmin.from('users').update({ status: 'PENDING_STUDENT_VERIFICATION' }).eq('id', user.id);
 
-    return res.json({ success: true, message: 'Verification submitted' });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    res.json({ success: true, message: 'Verification submitted' });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Internal Server Error' });
   }
 });
 
-router.get('/me', async (req: Request, res: Response): Promise<any> => {
+router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+  if (!authHeader) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
   const token = authHeader.split(' ')[1];
 
   try {
     const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+    if (authErr || !user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
 
     const { data, error } = await supabaseAdmin
       .from('student_verifications')
@@ -74,9 +103,9 @@ router.get('/me', async (req: Request, res: Response): Promise<any> => {
 
     if (error && error.code !== 'PGRST116') throw error; // ignore no rows
 
-    return res.json(data || null);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    res.json(data || null);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Internal Server Error' });
   }
 });
 

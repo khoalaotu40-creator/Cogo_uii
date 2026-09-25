@@ -13,19 +13,19 @@ export function Routes() {
     return <div style={{ padding: '2rem', textAlign: 'center' }}>Loading...</div>;
   }
 
+  // Boolean routing logic matches user request: NO SESSION -> /login, etc.
   return (
     <RouterRoutes>
       <Route element={<AuthLayout />}>
         {/* Public Routes */}
         <Route path="/login" element={!session ? <Login /> : <Navigate to="/" replace />} />
         <Route path="/register" element={!session ? <Register /> : <Navigate to="/" replace />} />
-        
-        {/* OTP Route (Usually handled within components, but as a separate route if needed) */}
-        <Route path="/register/verify-phone" element={<OtpVerification />} />
+        <Route path="/register/verify-phone" element={!session ? <OtpVerification /> : <Navigate to="/" replace />} />
 
         {/* Protected Registration Routes */}
         <Route path="/register/verify-student" element={
-          session && userProfile?.status === 'PENDING_STUDENT_VERIFICATION' || userProfile?.status === 'STUDENT_REJECTED' 
+          !session ? <Navigate to="/login" replace /> :
+          (userProfile?.status === 'PENDING_STUDENT_VERIFICATION' || userProfile?.status === 'STUDENT_REJECTED') 
             ? <StudentVerification /> 
             : <Navigate to="/" replace />
         } />
@@ -34,12 +34,17 @@ export function Routes() {
       {/* App Home */}
       <Route path="/" element={
         !session ? <Navigate to="/login" replace /> :
-        userProfile?.status === 'PENDING_STUDENT_VERIFICATION' || userProfile?.status === 'STUDENT_REJECTED' ? <Navigate to="/register/verify-student" replace /> :
-        userProfile?.status === 'SUSPENDED' ? <div>Account Suspended</div> :
+        (userProfile?.status === 'PENDING_STUDENT_VERIFICATION' || userProfile?.status === 'STUDENT_REJECTED') ? <Navigate to="/register/verify-student" replace /> :
+        userProfile?.status === 'SUSPENDED' ? <div>Tài khoản đã bị khoá</div> :
+        userProfile?.status === 'UNVERIFIED_PHONE' ? <Navigate to="/register" replace /> :
         <div>
           <h1>CoGo Home</h1>
           <p>Welcome, {userProfile?.name}!</p>
-          <button onClick={() => {/* logout */}}>Logout</button>
+          <button onClick={async () => {
+             const { supabase } = await import('@/shared/lib/supabase');
+             await supabase.auth.signOut();
+             window.location.reload();
+          }}>Đăng xuất</button>
         </div>
       } />
     </RouterRoutes>

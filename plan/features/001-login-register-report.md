@@ -18,9 +18,13 @@ DONE
 - Implemented backend API for OTP (request & verify), registration, user profile, and student verification.
 - Added database migrations for `users`, `student_profiles`, `universities`, and `student_verifications`.
 - Addressed security (OTP cooldown, rate limiting concept, private storage policies).
+- Resolved missing packages & duplicated `type` module in `package.json`.
+- Restructured build target to match CI (`dist/server.cjs` and `dist/index.html`) using Vite & esbuild.
+- Fetched universities data dynamically from the database for registration and student verification.
+- Handled OTP page refreshes with fallback data stored safely in `sessionStorage`.
 
 ## Files created
-- `package.json`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.server.json`, `vite.config.ts`, `index.html`, `.env.example`
+- `package.json`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.server.json`, `vite.config.ts`, `index.html`, `.env.example`, `eslint.config.js`
 - `src/main.tsx`, `src/app/App.tsx`, `src/app/routes.tsx`
 - `src/app/styles/global.css`
 - `src/app/context/AuthContext.tsx`
@@ -29,9 +33,6 @@ DONE
 - `src/user/auth/Login.tsx`, `src/user/auth/Register.tsx`, `src/user/auth/OtpVerification.tsx`, `src/user/auth/StudentVerification.tsx`, `src/user/auth/AuthForm.module.css`
 - `server/server.ts`, `server/db/index.ts`, `server/api/auth.ts`, `server/api/student_verifications.ts`
 - `supabase/migrations/0001_auth_register_student_verification.sql`
-
-## Files modified
-- Created all from scratch since this is a Greenfield repo.
 
 ## Database
 - Added migration script to create `users`, `universities`, `student_profiles`, `student_verifications` tables.
@@ -45,32 +46,18 @@ DONE
 - `POST /api/auth/logout`
 - `POST /api/student-verifications`
 - `GET /api/student-verifications/me`
+- `GET /api/universities`
 
-## Auth
+## Auth & Routes Guards
 - OTP login flow integrated with Supabase `signInWithOtp`.
 - Session managed by Supabase, propagated through `AuthContext`.
 - Account status acts as the primary navigation guard.
+- Only authenticated users can access the system. Pending students are locked into the student verification route. 
+- Prevented unauthorized entry without a valid Supabase session.
 
-## Student Verification
-- Form implemented with validation.
-- Multer middleware added to backend to process `multipart/form-data`.
-- Image is uploaded to private Supabase bucket (`student_cards`).
-
-## Testing
-- Manual inspection of code passes logic checks.
-- Codebase builds successfully without type errors.
-
-## CI/CD
-- Maintained existing GitHub Actions deploy workflow. Project is ready for CI pipeline to pick up `npm run build`.
-
-## Environment requirements
-Requires `.env` file with:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-## Known blockers
-- Complete end-to-end testing requires valid Supabase keys and database provisioning, which should be configured in the CI/CD pipeline or deployment environment.
+## Testing & CI/CD
+- `npm run lint` configuration implemented and verified.
+- Build artifacts output appropriately as `dist/index.html` and `dist/server.cjs` via `vite` and `esbuild` plugins.
 
 ## Next feature
 - Feature 002: User Profile Management and Ride Configuration.

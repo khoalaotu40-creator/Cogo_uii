@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '@/shared/lib/api';
 import styles from './AuthForm.module.css';
 import { Phone, User, Building2 } from 'lucide-react';
+
+interface University {
+  id: string;
+  name: string;
+}
 
 export function Register() {
   const [name, setName] = useState('');
@@ -10,14 +15,20 @@ export function Register() {
   const [universityId, setUniversityId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [universities, setUniversities] = useState<University[]>([]);
+  const [loadingUnis, setLoadingUnis] = useState(true);
   const navigate = useNavigate();
 
-  // Basic mock universities, in reality fetched from backend
-  const universities = [
-    { id: '1', name: 'Đại học Bách Khoa Hà Nội' },
-    { id: '2', name: 'Đại học Quốc gia Hà Nội' },
-    { id: '3', name: 'Đại học Kinh tế Quốc dân' },
-  ];
+  useEffect(() => {
+    api.get('/universities')
+      .then((data) => {
+        setUniversities(data as University[]);
+      })
+      .catch((err) => {
+        console.error(err);
+      })
+      .finally(() => setLoadingUnis(false));
+  }, []);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,10 +40,14 @@ export function Register() {
 
     setLoading(true);
     try {
-      // For registration, we first verify phone number.
       await api.post('/auth/otp/request', { phone, type: 'register' });
+      const registerData = { name, phone, universityId };
+      sessionStorage.setItem('otpPhone', phone);
+      sessionStorage.setItem('otpType', 'register');
+      sessionStorage.setItem('otpRegisterData', JSON.stringify(registerData));
       navigate('/register/verify-phone', { 
-        state: { phone, type: 'register', registerData: { name, phone, universityId } } 
+        state: { phone, type: 'register', registerData },
+        replace: true
       });
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -86,9 +101,11 @@ export function Register() {
             value={universityId} 
             onChange={(e) => setUniversityId(e.target.value)}
             className={styles.input}
-            disabled={loading}
+            disabled={loading || loadingUnis}
           >
-            <option value="" disabled>Trường học / Giới thiệu</option>
+            <option value="" disabled>
+              {loadingUnis ? 'Đang tải danh sách trường...' : 'Trường học / Giới thiệu'}
+            </option>
             {universities.map(u => (
               <option key={u.id} value={u.id}>{u.name}</option>
             ))}
@@ -97,7 +114,7 @@ export function Register() {
         
         {error && <p className={styles.errorText}>{error}</p>}
 
-        <button type="submit" className={styles.button} disabled={loading}>
+        <button type="submit" className={styles.button} disabled={loading || loadingUnis}>
           {loading ? 'Đang xử lý...' : 'Xác thực sinh viên →'}
         </button>
       </form>

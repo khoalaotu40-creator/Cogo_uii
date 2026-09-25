@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '@/shared/lib/api';
 import { useAuth } from '@/app/context/AuthContext';
@@ -14,14 +14,22 @@ export function OtpVerification() {
   const location = useLocation();
   const { refreshProfile } = useAuth();
   
-  const phone = location.state?.phone;
-  const type = location.state?.type; // 'login' | 'register'
-  const registerData = location.state?.registerData;
+  const statePhone = location.state?.phone;
+  const stateType = location.state?.type;
+  const stateRegisterData = location.state?.registerData;
 
-  if (!phone) {
-    navigate('/login');
-    return null;
-  }
+  // Fallback to session storage if browser refreshed
+  const [phone, setPhone] = useState(statePhone || sessionStorage.getItem('otpPhone'));
+  const [type, setType] = useState(stateType || sessionStorage.getItem('otpType'));
+  const [registerData, setRegisterData] = useState(stateRegisterData || JSON.parse(sessionStorage.getItem('otpRegisterData') || 'null'));
+
+  useEffect(() => {
+    if (!phone) {
+      navigate('/login');
+    }
+  }, [phone, navigate]);
+
+  if (!phone) return null;
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,13 +39,9 @@ export function OtpVerification() {
     setLoading(true);
 
     try {
-      // 1. Verify OTP with Supabase (backend handles it or directly frontend via proxy)
-      // Since backend is required for secure handling, we pass to our backend endpoint
       const { session } = await api.post('/auth/otp/verify', { phone, otp });
       
-      // If register flow, we need to create profile
       if (type === 'register' && registerData) {
-        // Set the token temporarily if our backend returned one
         if (session?.access_token) {
           await supabase.auth.setSession(session);
         }
@@ -46,8 +50,12 @@ export function OtpVerification() {
          await supabase.auth.setSession(session);
       }
 
+      // Clear session storage on success
+      sessionStorage.removeItem('otpPhone');
+      sessionStorage.removeItem('otpType');
+      sessionStorage.removeItem('otpRegisterData');
+
       await refreshProfile();
-      // AuthContext will automatically redirect based on userProfile state
       navigate('/');
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -96,7 +104,7 @@ export function OtpVerification() {
             type="button" 
             onClick={handleResend}
             disabled={loading}
-            style={{ background: 'none', border: 'none', color: 'var(--brand-sage)', fontWeight: 500, fontSize: '14px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--brand-sage)', fontWeight: 500, fontSize: '14px', cursor: 'pointer' }}
           >
             Gửi lại mã
           </button>

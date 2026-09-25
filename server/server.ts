@@ -18,6 +18,17 @@ app.get('/api/health', (req, res) => {
 });
 
 // Routes
+app.get('/api/universities', async (req, res) => {
+  try {
+    const { supabaseAdmin } = await import('./db');
+    const { data, error } = await supabaseAdmin.from('universities').select('*').eq('status', 'ACTIVE');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Failed to fetch universities' });
+  }
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/student-verifications', studentVerificationRoutes);
 
