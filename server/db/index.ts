@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import WebSocket from 'ws';
+Object.assign(global, { WebSocket });
 dotenv.config();
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'http://localhost:54321';
