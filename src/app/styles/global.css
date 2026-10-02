@@ -1,0 +1,39 @@
+:root {
+  --brand-dark: #0E4834;
+  --brand-sage: #6F9E87;
+  --sage-hover: #5D8B74;
+  --badge-bg: #E8F5EF;
+  --badge-text: #2D7755;
+  --input-bg: #F8FAFC;
+  --mint: #A5DFC5;
+  --mint-light: #A2E2C8;
+  --border: #E2E8F0;
+  
+  --bg-primary: #FFFFFF;
+  --text-primary: #1E293B;
+  --text-secondary: #64748B;
+  --error: #EF4444;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #F1F5F9; /* slight gray background for the overall page */
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
